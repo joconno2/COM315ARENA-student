@@ -1,23 +1,43 @@
 #!/usr/bin/env python3
-"""COM315ARENA — minimal example client.
+"""COM315ARENA — example client.
 
-Usage:  python3 simple_client.py <host> <port> <name>
+Usage:
+    python3 example_client.py <host> <port> <your_name>
 
-This bot wanders randomly and shoots at nearby enemies.
-Students should use this as a starting point and build a smarter strategy.
+Example:
+    python3 example_client.py localhost 9000 MyBot
+
+This client demonstrates:
+  - TCP connection and JOIN handshake
+  - Correct TCP framing (buffering + splitting on newlines)
+  - Threaded architecture (receiver thread + main decision loop)
+  - Parsing GAMESTATE, HIT, DEATH, KILL, RESPAWN messages
+  - Using the provided strategy module for decision-making
+
+YOUR JOB: Write your own version of the NETWORKING code below.
+The strategy module (strategy.py) handles what commands to send.
+Your client handles HOW to send and receive them over TCP.
 """
 
 import json
-import math
-import random
 import socket
 import sys
 import threading
 import time
 
+from strategy import decide
+
+
+# ─── Receiver Thread ──────────────────────────────────────────
+#
+# Runs in the background. Reads bytes from the socket, buffers
+# them, splits on newlines, and parses each complete message.
+#
+# IMPORTANT: TCP is a byte stream. A single recv() can return
+# partial messages or multiple messages glued together. The
+# buffer + split-on-newline pattern below is REQUIRED.
 
 def recv_loop(sock, state):
-    """Background thread: continuously reads server messages."""
     buf = ""
     while True:
         try:
@@ -31,6 +51,7 @@ def recv_loop(sock, state):
             state["running"] = False
             return
 
+        # Split buffer into complete lines
         while "\n" in buf:
             line, buf = buf.split("\n", 1)
             line = line.strip()
@@ -42,7 +63,8 @@ def recv_loop(sock, state):
                 state["id"] = info["id"]
                 state["map"] = info["map"]
                 state["walls"] = info["walls"]
-                print(f"[*] Joined as player {info['id']} at ({info['pos'][0]}, {info['pos'][1]})")
+                print(f"[*] Joined as player {info['id']}"
+                      f" at ({info['pos'][0]:.0f}, {info['pos'][1]:.0f})")
 
             elif line.startswith("GAMESTATE "):
                 state["game"] = json.loads(line[10:])
@@ -70,9 +92,14 @@ def recv_loop(sock, state):
                 print(f"[!] {line}")
 
 
+# ─── Send Helper ──────────────────────────────────────────────
+
 def send(sock, msg):
+    """Send a newline-terminated command to the server."""
     sock.sendall((msg + "\n").encode())
 
+
+# ─── Main ─────────────────────────────────────────────────────
 
 def main():
     if len(sys.argv) < 4:
@@ -81,58 +108,40 @@ def main():
 
     host, port, name = sys.argv[1], int(sys.argv[2]), sys.argv[3]
 
+    # 1. Connect via TCP
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.connect((host, port))
     print(f"[*] Connected to {host}:{port}")
 
+    # 2. Send JOIN
     send(sock, f"JOIN {name}")
 
+    # 3. Start the receiver thread
     state = {"running": True, "game": None, "id": None, "map": None}
     t = threading.Thread(target=recv_loop, args=(sock, state), daemon=True)
     t.start()
 
-    # wait for welcome
+    # Wait for WELCOME
     while state["id"] is None and state["running"]:
         time.sleep(0.05)
-
     if not state["running"]:
         return
 
-    print("[*] Playing!  Ctrl+C to quit.")
+    print("[*] Playing! Ctrl+C to quit.")
 
+    # 4. Decision loop — read game state, call strategy, send command
     while state["running"]:
         time.sleep(0.1)  # ~10 decisions per second
+
         gs = state.get("game")
         if not gs:
             continue
 
-        me = gs["you"]
-        if not me["alive"]:
-            continue
-
-        mx, my = me["pos"]
-        players = gs.get("players", [])
-        resources = gs.get("resources", [])
-
-        # ── strategy: shoot nearest enemy, move toward nearest resource ──
-
-        # shoot at closest visible enemy
-        if players and me["cd"] == 0:
-            closest = min(players, key=lambda p: math.hypot(p["pos"][0] - mx, p["pos"][1] - my))
-            dx = closest["pos"][0] - mx
-            dy = closest["pos"][1] - my
-            send(sock, f"SHOOT {dx:.1f} {dy:.1f}")
-
-        # move toward closest resource (or wander)
-        if resources:
-            target = min(resources, key=lambda r: math.hypot(r["pos"][0] - mx, r["pos"][1] - my))
-            dx = target["pos"][0] - mx
-            dy = target["pos"][1] - my
-            send(sock, f"MOVE {dx:.1f} {dy:.1f}")
-        else:
-            # random wander
-            angle = random.uniform(0, 2 * math.pi)
-            send(sock, f"MOVE {math.cos(angle):.1f} {math.sin(angle):.1f}")
+        # The strategy module decides what command to send.
+        # Your job is everything AROUND this call — the networking.
+        command = decide(gs)
+        if command:
+            send(sock, command)
 
 
 if __name__ == "__main__":

@@ -222,17 +222,19 @@ The competitive edge comes from **how well you understand and use the network**,
 
 ## Hints
 
-The game server is more than what's documented here. Some questions to think about:
+The game server is more than what's documented here. Some questions worth investigating:
 
-- What ports is the server running on? What's on each port?
-- What protocol does the spectator page use to get its data?
-- Is the server actually enforcing any kind of authentication?
+- The `decide()` function returns **one** command per tick. Does the server only accept one?
+- What ports is the server actually listening on? Have you checked all of them?
+- What protocol does the spectator page use to get its data? Could your client use it too?
+- What information does the spectator receive vs. what your TCP client receives?
+- Is the server enforcing any kind of authentication or identity verification?
 - What happens if you open more than one connection?
-- What can you learn from watching the network traffic with Wireshark or tcpdump?
-- Is the information your client receives the same information other parts of the system receive?
-- Are there any server commands that aren't listed in this README?
+- Are `MOVE`, `STOP`, `SHOOT`, and `CHAT` the only commands the server understands?
+- What can you learn by watching network traffic with Wireshark or tcpdump?
+- Does `socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)` do anything useful?
 
-You don't need to answer all of these. But exploring them is where the bonus points are.
+You don't need to explore all of these. But this is where the bonus points are.
 
 ---
 
